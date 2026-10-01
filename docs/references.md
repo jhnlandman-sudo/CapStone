@@ -1,0 +1,19 @@
+# References — technical foundations of the BBO capstone
+
+Each entry records the paper, the idea taken from it, and where that idea is implemented.
+
+| # | Source | Idea used | Where it lands |
+|---|--------|-----------|----------------|
+| 1 | Jones, D. R., Schonlau, M. & Welch, W. J. (1998). *Efficient Global Optimization of Expensive Black-Box Functions.* **Journal of Global Optimization** 13(4), 455–492. https://doi.org/10.1023/A:1008306431147 | Surrogate-plus-acquisition template for expensive evaluations; the warning that performance depends on the estimated correlation parameters | The overall loop; and the reason the ARD estimates get audited each round rather than taken on trust |
+| 2 | Srinivas, N., Krause, A., Kakade, S. & Seeger, M. (2010). *Gaussian Process Optimization in the Bandit Setting: No Regret and Experimental Design.* **ICML 2010**. https://arxiv.org/abs/0912.3995 | GP-UCB with an explicit exploration parameter and a cumulative-regret bound | `acquisition.py` — UCB with beta set per function (0.5–0.8), deliberately below the theoretical schedule |
+| 3 | Rasmussen, C. E. & Williams, C. K. I. (2006). *Gaussian Processes for Machine Learning.* MIT Press. https://gaussianprocess.org/gpml/ | Automatic relevance determination: per-dimension lengthscales as a relevance measure | `surrogates.py` — ARD `RBF` + `WhiteKernel`; lengthscales printed every round as the primary diagnostic |
+| 4 | Kandasamy, K., Schneider, J. & Póczos, B. (2015). *High Dimensional Bayesian Optimisation and Bandits via Additive Models.* **ICML 2015**, PMLR 37. https://proceedings.mlr.press/v37/kandasamy15.html | Additive decomposition into low-dimensional components; when additivity is and is not safe | `analytic.py` — single-coordinate probes and three-point quadratic closures (F4 x3, F6 x1, F8 dim 5); the F2 ridge-correction is an explicit test of the assumption |
+| 5 | Eriksson, D., Pearce, M., Gardner, J., Turner, R. D. & Poloczek, M. (2019). *Scalable Global Optimization via Local Bayesian Optimization (TuRBO).* **NeurIPS 2019**. https://arxiv.org/abs/1910.01739 | Local trust regions outperform a single global GP as dimension rises, because the global fit over-smooths | Trust-region radii on F6 (0.15) and F7 (0.09); the rule that a GP under-fitting its own incumbent may be used for ranking, not for level |
+| 6 | Hvarfner, C., Hellsten, E. O. & Nardi, L. (2024). *Vanilla Bayesian Optimization Performs Great in High Dimensions.* **ICML 2024**, PMLR 235. https://arxiv.org/abs/2402.02229 | "Vanilla BO fails in high dimensions" is largely a model-specification artefact; lengthscale priors should scale with dimensionality | The standing rule that a long ARD lengthscale on a coordinate I never varied is evidence about my sampling, not about the function — the check that released F8's dimension 8 |
+| 7 | Hansen, N., Auger, A., Ros, R., Mersmann, O., Tušar, T. & Brockhoff, D. (2021). *COCO: a platform for comparing continuous optimizers in a black-box setting.* **Optimization Methods and Software** 36(1), 114–144. https://coco-platform.org/ | Standardised black-box testbeds (BBOB) and reporting conventions | Planned: calibrate beta, trust-region radius and the closure/UCB split on BBOB functions of matching dimension before spending real queries |
+
+## Software
+
+- **scikit-learn** — `GaussianProcessRegressor`, ARD `RBF` + `WhiteKernel`, `n_restarts_optimizer=20`, `random_state=0`.
+- **NumPy / SciPy** — `linalg.solve` (three-point vertices), `linalg.lstsq` (the four-point Gaussian closure on F1), `optimize.minimize` L-BFGS-B with multi-start for the acquisition.
+- Considered and not adopted: **BoTorch / GPyTorch** (Monte Carlo acquisitions, exact-GP scaling — neither constraint binds at 15–45 observations), **Optuna / Nevergrad** (ask/tell without an exposed posterior, which is the object most of the decisions come from).
