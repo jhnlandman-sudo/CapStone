@@ -15,18 +15,18 @@ this repository.
 - **[References](docs/references.md)** — each design decision mapped to its source and to the
   code that implements it.
 
-## Status after round 9 (round 10 submitted, results pending)
+## Status after round 10 (round 11 submitted, results pending)
 
 | Fn | d | Best *y* | Status |
 |---|---|---|---|
-| F1 | 2 | 2.000000 | Solved (analytic maximum) |
-| F2 | 2 | 0.725670 | Noisy — replicating the best point |
-| F3 | 3 | −0.025801 | Converged locally; noisy |
-| F4 | 4 | 0.680110 | Converged; sharp peak |
-| F5 | 4 | 8,662.405 | Solved (corner optimum) |
-| F6 | 5 | −0.061133 | Replicating the best point to test whether it holds |
-| F7 | 6 | 2.168082 | Still improving |
-| F8 | 8 | 9.913004 | Converged; small single-coordinate gains left |
+| F1 | 2 | 2.000000 | Solved (analytic maximum); noise-free |
+| F2 | 2 | 0.725670 | Ridge in x1 near 0.69; noisy (three repeats span 0.60–0.73) |
+| F3 | 3 | −0.025801 | Record was a lucky draw (repeat −0.046); converged within noise |
+| F4 | 4 | 0.708891 | Improving; x4 bracketed, vertex 0.4166 |
+| F5 | 4 | 8,662.405 | Solved (corner optimum); noise-free |
+| F6 | 5 | −0.061133 | Narrow peak confirmed by repeat (−0.088) |
+| F7 | 6 | 2.301303 | Still improving (joint GP moves) |
+| F8 | 8 | 9.913004 | Converged; single-coordinate refinements |
 
 ## Repository layout
 

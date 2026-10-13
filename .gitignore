@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+gp_settings.json
+!rounds/**/gp_settings.json
+data_w*/
