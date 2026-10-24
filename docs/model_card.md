@@ -1,171 +1,111 @@
-# Model card — "classify-then-query" Bayesian optimisation for the BBO capstone
+# Model Card — classify-then-query Bayesian optimisation
 
-*Structure follows Mitchell et al., "Model Cards for Model Reporting" (2019), as adapted in PCMLAI
-Mini-lesson 21.2. The data are described in [datasheet.md](datasheet.md).*
+*Johan Landman · Imperial College PCMLAI black-box optimisation challenge · final version (round 12 results,
+round 13 submitted). Structure follows the programme's Module 25 model card template, informed by the
+[Google model card examples](https://modelcards.withgoogle.com/model-reports). The earlier, longer version is kept in
+[archive/model_card_v1_round10.md](archive/model_card_v1_round10.md). Per-function detail is in the
+[datasheet](datasheet.md).*
 
----
+## Model Description
 
-## 1. Overview
+**Input:** the full evaluation history of one function: every input vector *x* in [0, 1]^d (d = 2 to 8)
+with its output *y*, from the supplied initial design plus all earlier portal rounds.
 
-| | |
-|---|---|
-| **Name** | Classify-then-query GP optimisation |
-| **Type** | Sequential, model-based black-box optimiser. A Gaussian-process (GP) surrogate with an upper-confidence-bound (UCB) or posterior-mean acquisition, combined with analytic local closures (quadratic and Gaussian fits) and deliberate replicate queries. |
-| **Version** | v10, the round-10 submission (29 September 2026). Each round's exact code is kept in `rounds/weekNN/`. |
-| **Owner** | Johan Landman |
-| **Libraries** | Python 3; scikit-learn 1.8.0 (`GaussianProcessRegressor`, `RBF`/`Matern` + `WhiteKernel`); NumPy; SciPy; pandas. |
-| **Inputs → output** | The full evaluation history of one function → one query in [0, 1]^d, written as `0.dddddd` strings, plus a written numerical prediction. |
+**Output:** one query per function per round, written in the portal format `0.dddddd-0.dddddd-…`, together
+with a written numerical prediction of the result. Both are produced by a seeded script
+(`rounds/weekNN/weekNN.py`) and checked by `src/validate_query.py`.
 
-## 2. Intended use
+**Model Architecture:** a sequential, model-based optimiser with three layers.
 
-**Suitable for:**
-- Maximising expensive, low-to-moderate-dimensional functions (d ≤ 8 here), where each
-  evaluation is costly and the budget is tens of queries, not thousands.
-- Settings where every decision must be auditable: each query is produced by seeded code and
-  carries a prediction that the next result confirms or falsifies.
+1. **Surrogate: Gaussian process (GP)** per function, scikit-learn `GaussianProcessRegressor`.
+   - Kernel: constant × (RBF or Matérn-5/2, one lengthscale per input) + white noise.
+   - Kernel family and lengthscale floor chosen per function by 5-fold cross-validation (`src/tune.py`),
+     re-run every round from round 7.
+   - Outputs normalised; F5 modelled on log *y*.
+   - The fitted lengthscales give each input a relevance score, used to decide which coordinates to move.
+2. **Acquisition rules**, one chosen per function:
+   - Upper confidence bound (UCB, β 0.5–0.8), first globally, then within a trust region;
+   - GP posterior-mean maximiser within a small radius;
+   - single-coordinate probes, closed with a three-point quadratic vertex;
+   - closed-form fits where the structure is known (an isotropic Gaussian solved F1);
+   - exact repeats to measure noise.
+3. **Policy layer: classify, then query.** Each round, each function is put in one class, and the class
+   picks the move:
 
-**Avoid for:**
-- **Problems with large evaluation budgets or cheap evaluations.** Population methods (for
-  example CMA-ES) or plain random search are simpler there, and GP fitting scales as n³.
-- **High dimensions (d ≳ 20) without structural assumptions.** The GP's coverage in this
-  project is already thin at d = 8.
-- **Functions with discontinuities, categorical inputs or non-stationary behaviour.** The kernel
-  assumes one smoothness everywhere.
-- **Any setting that needs a global-optimality guarantee.** The method converges to the basin it
-  finds.
-- **Automated use without review.** A human policy layer chooses the move type for each
-  function (see §5).
-
-## 3. Details — strategy and how it evolved over ten rounds
-
-1. **Rounds 1–3: GP-UCB and directional moves.** A GP with a separate lengthscale per input
-   dimension (automatic relevance determination, ARD, RBF kernel) plus a white-noise term was
-   fitted to the supplied initial design. It was used alongside simple directional moves away
-   from the best initial points. The fitted lengthscales were the main diagnostic of which
-   inputs matter.
-2. **Rounds 4–6: local structure.** Once incumbents emerged, I switched to cheaper and more
-   exact tools:
-   - **Single-coordinate probes and three-point quadratic vertices**, for example F4 x3,
-     F6 x1 and F8 dim 5.
-   - **A closed-form isotropic-Gaussian fit that solved F1.** Its centre is (0.628541,
-     0.628541) and its amplitude is 2.
-   - **Trust-region UCB for F6 and F7**, with radius 0.09–0.15 and β 0.5–0.8.
-
-   I also added a standing *freeze-artefact* check: a coordinate never varied looks inactive to
-   the GP, so its whole range is scanned before accepting that. This released F8's dimension 8
-   for testing, although the test then showed the GP's predicted gain was wrong.
-3. **Round 7: tuned surrogate.** `src/tune.py` selects the kernel family (RBF or Matérn-5/2) and
-   the lengthscale floor per function by 5-fold cross-validated root-mean-square error (RMSE),
-   and is re-run every round. Since round 6, every query has had a written numerical
-   prediction.
-4. **Rounds 8–9: noise recognised.** Three vertex predictions on F2 and F3 kept failing. With
-   18 points, the re-tuned GP fitted a real noise term (sd 0.036 on F2, 0.11 on F6). Exact
-   replicates then settled it: F5 returned 8662.405 twice, so it is noise-free; F2 returned
-   0.650 and then 0.726 at the same input, so it is noisy. For multi-coordinate moves I adopted
-   half-steps after an eight-dimensional GP move on F8 failed.
-5. **Round 10: classify, then query.** Each function now gets the policy its evidence supports:
-
-| Class | Functions | Rule |
+| Class | Functions (final) | Move |
 |---|---|---|
-| Solved / at a bound | F1, F5 | Resubmit the known optimum |
-| Noisy | F2, F3, F6 | Replicate the best point; decide on averages, not single draws |
-| Noise-free, still improving | F7 | GP posterior-mean maximiser within a trust region (radius 0.08) |
-| Noise-free, converged | F4, F8 | One coordinate at a time, so the effect can be attributed |
+| Solved | F1, F5 | Resubmit the known optimum |
+| Noisy | F2, F3, F6 | Repeat the best point; decide on averages |
+| Still improving | F7 | One coordinate at a time along the relevant inputs (small GP step where reliable) |
+| Converged | F4, F8 | One coordinate at a time, so each result is attributable |
 
-## 4. Performance
+In the final round there is nothing left to learn for, so the rule is pure exploitation: the highest
+reading on noise-free functions, and the highest mean minus standard error on noisy ones.
 
-**Metrics.**
-1. **Best observed *y*.** This is the competition's measure.
-2. **Improvement over the best point in the supplied initial design.** This isolates what the
-   queries added.
-3. **Rounds producing a new best.** This shows the rate of progress.
-4. **Prediction accuracy.** Written prediction against actual result, which checks the
-   surrogate's calibration.
-5. **Surrogate cross-validated RMSE,** used for model selection only.
+## Performance
 
-| Fn | d | Best initial | Best to date | Change | New-best rounds | Status (after round 9) |
-|---|---|---|---|---|---|---|
-| F1 | 2 | ≈ 0 | **2.000000** | +2.0 | 1, 5, 6, 7 | Solved, analytic maximum; noise-free |
-| F2 | 2 | 0.6112 | **0.7257** | +0.114 | 4, 9 | Noisy (sd ≈ 0.05); best point read twice |
-| F3 | 3 | −0.0348 | **−0.0258** | +0.009 | 1 | Converged locally; noisy (sd ≈ 0.009) |
-| F4 | 4 | −4.0255 | **0.6801** | +4.71 | 1, 4 | Converged; very sharp peak (x4 curvature ≈ −2700) |
-| F5 | 4 | 1,088.9 | **8,662.4** | ×8.0 | 1–7 | Solved, optimum at the corner (1,1,1,1); noise-free |
-| F6 | 5 | −0.7143 | **−0.0611** | +0.653 | 1, 6, 7 | Uncertain; best point being replicated |
-| F7 | 6 | 1.3650 | **2.1681** | +0.803 | 2, 4, 5, 7, 8, 9 | Still improving, with diminishing steps |
-| F8 | 8 | 9.5985 | **9.9130** | +0.315 | 1, 3–5, 7, 8 | Converged; best remaining single-coordinate gain ≈ +0.005 |
+**How performance is measured.** All measures use the evaluation history in `data/` (the supplied design
+plus 12 scored portal rounds):
+1. **Best value found**, the competition's measure, compared with the best point in the supplied data.
+2. **Prediction accuracy:** the written prediction for each query against its result.
+3. **Surrogate cross-validated RMSE**, used only for model selection.
 
-**Prediction accuracy.**
-- **Round 9:** four of eight predictions held within their stated bands (F1, F5, F6 and F7; F7
-  came in at 2.1681 against a predicted 2.1674 ± 0.014). Four were falsified (F2, F3, F4, F8).
-- **Round 7:** F8 matched its prediction to five decimals, while F2 and F3 were falsified.
-- **Pattern:** the GP's predictions are reliable along single lines on noise-free functions
-  (F7, F8 dim 6), and unreliable for multi-coordinate moves and on noisy functions.
+![Best value found by round](images/best_so_far.png)
 
-## 5. Assumptions, constraints and failure modes
+| Fn | d | Best in supplied data | Best found | Change |
+|---|---|---|---|---|
+| F1 | 2 | ≈ 0 | **2.000** | Solved (analytic maximum) |
+| F2 | 2 | 0.611 | **0.726** | +0.115 (replicated mean 0.608) |
+| F3 | 3 | −0.0348 | **−0.0250** | +0.010 |
+| F4 | 4 | −4.03 | **0.744** | +4.77 |
+| F5 | 4 | 1,089 | **8,662** | ×8.0 (solved, corner optimum) |
+| F6 | 5 | −0.714 | **−0.061** | +0.653 |
+| F7 | 6 | 1.365 | **2.390** | +1.025 |
+| F8 | 8 | 9.598 | **9.930** | +0.332 |
 
-**Assumptions.**
-- **Stationarity and smoothness.** The functions are assumed smooth, with one lengthscale per
-  dimension everywhere and a single Gaussian noise level everywhere.
-- **Local additivity.** The single-coordinate closures assume the function is locally additive
-  in its coordinates.
-- **Best-so-far scoring.** A query that scores badly costs information, not score.
+**Prediction accuracy (rounds 11 and 12).** Single-coordinate moves on noise-free functions landed close
+to prediction:
+- F4: x4 vertex predicted 0.7431, returned 0.7440;
+- F8: within 0.003 in both rounds;
+- F7: x2 move predicted 2.3255, returned 2.390.
 
-**Constraints.**
-- **Budget:** one query per function per round, about 13 rounds in total.
-- **Output format:** six-decimal values in [0, 1).
-- **Scale:** GP fitting is cubic in n, which is trivial at n ≤ 49 but would matter at scale.
+Multi-coordinate moves and curve fits on noisy functions missed badly:
+- F7 six-coordinate step: predicted 2.447, returned 2.202;
+- F2 ridge vertex: predicted 0.614, returned 0.463.
 
-**Failure modes seen in this project.**
-1. **Fitting quadratics to noise.** Three F2/F3 vertex predictions failed before the noise was
-   measured.
-2. **Over-smoothing narrow peaks.** Cross-validation prefers long lengthscales on F4, so the GP
-   under-rates its sharp peak. The GP also predicts 0.61 at an F2 point that has twice returned
-   ≥ 0.65.
-3. **The GP as a level estimate.** The GP misses its own incumbent by 0.2 on F6, so it is used
-   to rank candidates, not to predict values.
-4. **Multi-dimensional steps.** The F8 dim-8 and eight-dimension half-step moves both missed.
-5. **Local convergence mistaken for global.** 57% of queries sit near incumbents, so
-   "converged" means converged in the basin found.
-6. **Human policy layer.** The move type for each function is a documented judgement, not an
-   algorithm. The numbers can be reproduced, but the policy choices are subjective.
+The full table is in section 5 of the notebook.
 
-## 6. Ethical considerations — transparency, reproducibility and adaptation
+## Limitations
 
-**Reproducibility.** The functions are synthetic, so there is no direct social harm; the ethical
-stake is honesty about what the results show.
-- Raw data are kept read-only, and every processed file is regenerated by code.
-- Every query comes from seeded code and passes a format validator.
-- Library versions are pinned in `requirements.txt`.
+- **Local, not global.** Most late queries lie within 0.1 of the incumbent. "Converged" means converged
+  in the basin found; F6 and F8 in particular have large unexplored regions.
+- **Smoothness assumption.** The GP assumes one smoothness level everywhere. It over-smooths sharp peaks
+  (F4) and cannot represent boundary optima well without help (F5's corner was found by a hypothesis
+  test, not by the GP).
+- **Weak level predictions away from data.** The GP is good at ranking candidates and poor at predicting
+  values where it has little data. Six- and eight-dimensional GP steps missed by up to five standard
+  deviations.
+- **Noise.** On F2 (noise sd about 0.1) the noise is as large as any local signal, so the method cannot
+  improve on it with the budget available.
+- **Human policy layer.** Choosing each function's class and move is a documented judgement. The numbers
+  are reproducible from seeded code, but another analyst could choose differently.
+- **Small budget.** There are 12 scored points per function, so every conclusion rests on very few
+  observations.
 
-Together, these mean a reviewer can regenerate every submitted string.
+## Trade-offs
 
-**Honest reporting.** The prediction-versus-actual record in each round's docstring means
-failures are reported rather than quietly dropped. That record is what exposed the noise on F2
-and F3.
-
-**Adaptation to real problems.** The same discipline carries over to real expensive optimisation
-problems, such as tuning an engineering design or an actuarial model's parameters:
-- state the assumption behind each move;
-- replicate before trusting a single reading;
-- report the explored region honestly, so no one mistakes "best found" for "best possible".
-
-The stated failure modes (noise, over-smoothing, local convergence) tell a future user where
-the method needs changing before it is reused.
-
-## 7. Is more detail needed?
-
-The current structure is sufficient for a reviewer to follow and reproduce the work.
-- **Rationale:** the card gives the rationale and the outcomes.
-- **Per-round decisions:** these live in each round's script docstring, which gives claim,
-  evidence and prediction for every function.
-- **Data:** the datasheet covers these.
-
-Adding per-query detail here would duplicate those files and bury the key points. The one
-addition that *would* improve it is a machine-readable log (`rounds/predictions.csv`, with
-columns function, round, prediction, interval and actual), so prediction accuracy can be
-computed rather than read. That is planned for the next round.
-
-## References
-See [references.md](references.md). Also cited here: Gebru, T. et al. (2021), *Datasheets for
-Datasets*, Communications of the ACM 64(12); Mitchell, M. et al. (2019), *Model Cards for Model
-Reporting*, Proceedings of FAT* 2019.
+- **Exploration versus exploitation.** Early UCB exploration found the right regions (F4 −4.03 → 0.553 in
+  round 1). Later, shrinking trust regions and single-coordinate moves gave reliable but diminishing
+  gains (F7: +0.106, +0.075, +0.046). More exploration might have found better basins on F6 or F8, at the
+  cost of fewer refinements.
+- **Repeats versus new points.** A repeat cannot raise the record, but it reclassified three of the eight
+  functions as noisy and stopped several queries being wasted on curve fits to noise.
+- **Single-coordinate versus joint moves.** One-coordinate moves are slower in high dimensions but
+  attributable and reliable. Joint GP moves can gain more per query (F7 +0.133 in round 10) but failed twice
+  when the model extrapolated.
+- **Transparency versus automation.** A hand-written policy layer with written predictions is easy to audit
+  but needs judgement each round. A fully automated optimiser such as BoTorch would be faster to run but
+  harder to explain, and would not have flagged the noise problem as clearly.
+- **Where it performs poorly:** noisy functions with small signals (F2, F3); very narrow peaks the kernel
+  smooths away (F4); optima on the boundary (F5) unless tested explicitly; and high dimensions with thin
+  coverage (F8).
